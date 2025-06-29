@@ -60,7 +60,7 @@ export const createBooking = async (req, res) => {
 }
 
 // Function to get occupied seats
-export const getOccupiedSeats = async () => {
+export const getOccupiedSeats = async (req, res) => {
     try {
 
         const { showId } = req.params;
