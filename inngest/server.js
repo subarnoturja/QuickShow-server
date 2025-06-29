@@ -98,10 +98,125 @@ const sendBookingConfirmationEmail = inngest.createFunction(
     }
 )
 
+// Inngest Function to send reminders
+const sendShowReminders = inngest.createFunction(
+    { id: "send-show-reminders"},
+    { cron: "0 */8 * * *" }, // Every 8 hours
+    async({ step }) => {
+        const now = new Date();
+        const in8Hours = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+        const windowStart = new Date(in8Hours.getTime() - 10 * 60 * 1000);
+
+        // Prepare reminder tasks
+        const reminderTasks = await step.run("prepare-reminder-tasks", async () => {
+            const shows = await Show.find({
+                showTime: { $gte: windowStart, $lte: in8Hours },
+            }).populate('movie');
+            const tasks = [];
+            for(const show of shows){
+                if(!show.movie || !show.occupiedSeats) continue ;
+
+                const users = await User.find({ _id: { $in: userIds}}).select("name email");
+
+                for(const user of users){
+                    tasks.push({
+                        userEmail:user.email,
+                        userName: user.name,
+                        movieTitle: show.movie.title, 
+                        showTime: show.showTime,
+                    })
+                }
+            }
+            return tasks;
+        })
+        if(reminderTasks.length === 0){
+            return {sent: 0, message: "No reminders to send"}
+        }
+        // send reminder emails
+        const results = await step.run('send-all-reminders', async() => {
+            return await Promise.allSettled(
+                reminderTasks.map(task => sendEmail({
+                    to: task.userEmail,
+                    subject: `Reminder: Your movie "${task.movieTitle}" starts soon!`,
+                    body: `<div style={{ fontFamily: 'Arial, sans-serif', lineHeight: '1.5', color: '#333' }}>
+                    <h2>Hi ${task.userName},</h2>
+                    <p>
+                        Just a quick reminder! 🎬 Your movie <strong style={{ color: '#F84565' }}>"${task.movieTitle}"</strong> is starting soon.
+                    </p>
+                    <p>
+                        <strong>Showtime:</strong> ${new Date(task.showTime).toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })}
+                    </p>
+                    <p>
+                        Don’t forget to arrive at the venue a little early to grab your snacks and get comfortable.
+                    </p>
+                    <p>
+                        Enjoy the show! 🍿
+                    </p>
+                    <p style={{ marginTop: '20px', fontSize: '0.9em', color: '#888' }}>
+                        This is an automated reminder. Please do not reply to this email.
+                    </p>
+                    </div>
+                    `
+                }))
+            )
+        })
+        const sent = results.filter(r => r.status === "fulfilled").length;
+        const failed = results.length - sent;
+
+        return { 
+            sent,
+            failed,
+            message: `Sent ${sent} reminder(s), ${failed} failed`
+        }
+    }
+)
+
+// Inngest function to send notifications when a new show is added
+const sendNewShowNotifications = inngest.createFunction(
+    { id: "send-new-show-notifications" },
+    { event: "app/show.added" },
+    async ({ event }) => {
+        const { movieTitle } = event.data;
+
+        const users = await User.find({})
+
+        for(const user of users){
+            const userEmail = user.email;
+            const userName = user.name;
+
+            const subject = `🎬 New Show Added: ${movieTitle}`;
+            const body = `<div style={{ fontFamily: 'Arial, sans-serif', lineHeight: '1.5', color: '#333' }}>
+            <h2>Hi ${userName},</h2>
+            <p>
+                Exciting news! 🎉 A new show for <strong style={{ color: '#F84565' }}>"${movieTitle}"</strong> has just been added to our schedule.
+            </p>
+            <p>
+                Don’t miss your chance to grab the best seats early and enjoy the experience on the big screen.
+            </p>
+            <p style={{ marginTop: '20px' }}>
+                We can’t wait to see you at the movies! 🍿
+            </p>
+            <p style={{ fontSize: '0.9em', color: '#888' }}>
+                You received this email because you're subscribed to new show updates.
+            </p>
+            </div>`;
+
+            await sendEmail({
+            to: userEmail,
+            subject,
+            body,
+        })
+        }
+        return {message: "Notifications sent."}
+    }
+)
+
 export const functions = [
     syncUserCreation, 
     syncUserDeletion,
     syncUserUpdation,
     releaseSeatsAndDeleteBooking,
-    sendBookingConfirmationEmail
+    sendBookingConfirmationEmail,
+    sendShowReminders,
+    sendNewShowNotifications
 ];
