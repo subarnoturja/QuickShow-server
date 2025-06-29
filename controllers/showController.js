@@ -41,7 +41,7 @@ export const addShow = async (req, res) => {
             poster_path: movieApiData.poster_path,
             backdrop_path: movieApiData.backdrop_path,
             genres: movieApiData.genres,
-            casts: movieApiData.cast,
+            casts: movieCreditsData.cast,
             release_date: movieApiData.release_date,
             original_language: movieApiData.original_language,
             tagline: movieApiData.tagline || "",
@@ -80,11 +80,12 @@ export const addShow = async (req, res) => {
 // API to get all shows from the database
 export const getShows = async (req, res) => {
     try {
-        const shows = await Show.find({showDateTime: {$gte: new Date()}}).populate('movie').sort({ showDateTime: 1 });
+        const shows = await Show.find({ showDateTime: { $gte: new Date() } }).populate('movie').sort({ showDateTime: 1 });
 
         // filter unique shows
-        const uniqueShows = new Set(shows.map(show => show.movie))
-        res.json({ success: true, shows: Array.from(uniqueShows)})
+        const uniqueMovieIds = [...new Set(shows.map(show => show.movie._id.toString()))];
+        const uniqueMovies = await Movie.find({ _id: { $in: uniqueMovieIds } });
+        res.json({ success: true, shows: Array.from(uniqueMovies)})
     } catch (error) {
         console.error(error);
         res.json({ success: false, message: error.message })
